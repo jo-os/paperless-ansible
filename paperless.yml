@@ -1,0 +1,97 @@
+---
+- hosts: paperless
+  become: true
+  tasks:
+  ######################### Install Docker #########################
+    - name: Install aptitude
+      apt:
+        name: aptitude
+        state: latest
+        update_cache: true
+
+    - name: Install required system packages
+      apt:
+        pkg:
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - software-properties-common
+          - python3-pip
+          - virtualenv
+          - python3-setuptools
+        state: latest
+        update_cache: true
+
+    - name: Add Docker GPG apt Key
+      apt_key:
+        url: https://download.docker.com/linux/ubuntu/gpg
+        state: present
+
+    - name: Add Docker Repository
+      apt_repository:
+        repo: deb https://download.docker.com/linux/ubuntu focal stable
+        state: present
+
+    - name: Update apt and install docker-ce
+      apt:
+        name: docker-ce
+        state: latest
+        update_cache: true
+
+    - name: remove EXTERNALLY-MANAGED if we're on debian12
+      ansible.builtin.file:
+        path: /usr/lib/python3.11/EXTERNALLY-MANAGED
+        state: absent
+      when: ansible_distribution == "Debian"
+
+    - name: Install Docker Module for Python
+      pip:
+        name: docker
+        
+######################### Start Containers #########################
+
+    - name: Redis container
+      docker_container:
+        name: broker
+        hostname: redis
+        image: docker.io/library/redis:7
+        volumes:
+          - .redisdata:/data
+        restart: yes
+
+    - name: Postgres container
+      docker_container:
+        name: db
+        hostname: postgres
+        image: docker.io/library/postgres:15
+        volumes:
+        - ./pg_data:/var/lib/postgresql/data
+        env:
+          POSTGRES_DB: paperless
+          POSTGRES_USER: paperless
+          POSTGRES_PASSWORD: paperless
+        restart: yes
+
+
+    - name: Paperless container
+      docker_container:
+        name: webserver
+        image: ghcr.io/paperless-ngx/paperless-ngx:latest
+        ports:
+          - 8000:8000
+        volumes:
+          - data:/usr/src/paperless/data
+          - media:/usr/src/paperless/media
+          - ./export:/usr/src/paperless/export
+          - ./consume:/usr/src/paperless/consume
+        env:
+          PAPERLESS_REDIS: redis://broker:6379
+          PAPERLESS_DBHOST: db
+          PAPERLESS_ADMIN_USER: admin
+          PAPERLESS_ADMIN_PASSWORD: passwort
+        links:
+          - db
+          - broker
+        restart: yes
+        
+#############################################################################
